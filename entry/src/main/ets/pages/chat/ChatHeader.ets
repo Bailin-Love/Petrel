@@ -40,6 +40,10 @@ import { emojiStatusVisible } from '../../util/emojiStatus';
 export const CHAT_HEADER_ACTION_SIZE: number = 42;
 export const CHAT_HEADER_RADIUS: number = 22;
 
+// 侧栏图标外框的圆角。历史实现（另一仓 b9c21a9）用的是 design/tokens 里的
+// RADIUS_BAR；本仓没有那份 tokens，而图标只有 18×14，圆角 3 就是它原本的
+// 视觉比例，直接给字面量，避免为一个数字新建一份 token。
+
 // 状态管理 V2（B2 批：六个 V1 宿主迁 @ComponentV2）。迁移本身不为性能——它是
 // **前置**：V1 @Component 既不能声明 @Param，也订阅不了 @ObservedV2 类上的
 // @Trace，后面「宿主接收控制器实例、在自己的 build() 里读 @Trace」那一整套
@@ -99,7 +103,7 @@ export struct ChatHeader {
   @Param menuShow: boolean = false;
   // 菜单浮层的锚点。promptAction.openMenu 按组件 id 定位，所以这颗键要挂上它。
   @Param menuAnchorId: string = '';
-  // 四个回调一律 @Event：调用点传的是内联箭头函数，页面每重建一次都是新闭包，
+  // 五个回调一律 @Event：调用点传的是内联箭头函数，页面每重建一次都是新闭包，
   // 若用 @Param，那个 `!==` 恒不相等会让本层跟着页面的每一次重建白刷一遍；
   // @Event 不具备观测能力，正好复现迁移前「普通字段只在构造时赋值一次」的行为。
   // 空实现默认值是仓库惯例（让组件能脱离父组件独立预览）。（B2 迁移）
