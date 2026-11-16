@@ -6,7 +6,8 @@
 // - 三栏时给聊天留 >= 560vp；双栏时整窗都可用。
 // 详情页（资料列）不参与这条线，它是第三栏，不属于导航分栏。
 export const NAV_MIN_VP: number = 328;
-export const NAV_MAX_VP: number = 440;
+// 434 而非 440：再宽左栏会让底部悬浮胶囊在观感上明显偏右，用户要求锁在当前值。
+export const NAV_MAX_VP: number = 434;
 export const CHAT_MIN_VP: number = 560;
 export const INFO_DIVIDER_VP: number = 2;
 
