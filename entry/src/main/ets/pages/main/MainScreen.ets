@@ -44,7 +44,7 @@ import {
 import { KEY_POWER_SMOOTH_TRANSITIONS, powerAnimationDuration } from '../../store/AppSettings';
 import { OneShotFrameCallback } from '../../util/oneShotFrameCallback';
 import { updateChecker, STORAGE_UPDATE_AVAILABLE } from '../../services/UpdateChecker';
-import { HdsTabs, HdsTabsController } from '@kit.UIDesignKit';
+import { DividerMode, HdsTabs, HdsTabsController } from '@kit.UIDesignKit';
 import { collapseMiniBar, HdsTabsFloatingModifier } from '../../util/hdsTabsFloating';
 import { logicalTabIndex, physicalTabIndex } from '../../util/mainTabIndex';
 import { dockMiniBarLayer } from './DockMiniBar';
@@ -96,8 +96,14 @@ const MINI_BALL: number = 40;
 const MINI_SIDE_MARGIN: number = 12;
 const MINI_COVER: number = 34;
 // 底距。一路试下来：bottomSafe + 12（太远）→ max(8, bottomSafe)（还是远）→
-// 半个 bottomSafe（太低）→ 现在取七成，落在后两者中间。别再往下：底部那条是
-// 系统的返回/主页手势带，胶囊下沿贴太近，下半截的点击会被系统先吃掉。
+// 半个 bottomSafe（太低）→ 七成（2026-09 定的）→ 八成半（2026-11-18 上半天）→
+// 现在九成半（2026-11-18 夜，按 dumpLayout 实测对齐畅连：畅连输入胶囊下沿
+// y=2754，我们 2764，差 10px≈3.3vp；九成半 = 30vp = 90px，胶囊下沿落到 2755）。
+// 别再往上加了：整条 bottomSafe（1.0）时输入胶囊会跑到 2749，比畅连还高 5px。
+// **必须和 util/composerChrome 的 COMPOSER_DOCK_GAP_RATIO 同步**，否则输入栏和
+// 底栏不落在同一条基线上（那个常量就是照这个数写的）。
+// 另一方面也别往下：底部那条是系统的返回/主页手势带，胶囊下沿贴太近，下半截
+// 的点击会被系统先吃掉。
 
 const DOCK_GAP: number = 6;     // minimum gap below the capsule
 const DOCK_ITEM_INSET: number = 5;
@@ -1097,7 +1103,7 @@ export struct MainScreen {
     .padding({ left: this.dockPadding(), right: this.dockPadding() })
     .margin({ bottom: this.keyboardH > 0
       ? DOCK_GAP
-      : Math.max(DOCK_GAP, Math.round(this.bottomSafe * 0.7)) })
+      : Math.max(DOCK_GAP, Math.round(this.bottomSafe * 0.95)) })
     // 返回列表时淡入；进入目的页时 syncDock() 同帧撤下玻璃层。
     .opacity(this.dockShown ? 1 : 0)
     // 下面这两行是**退场空档**的正解，缺一不可，都在 dockShown 翻 false 的那一
@@ -1180,13 +1186,17 @@ export struct MainScreen {
       .vertical(false)
       .barMode(BarMode.Fixed)
       .barPosition(BarPosition.End)
+      // 底栏收起时（进会话页、全屏媒体）HDS 仍会在栏区顶端画一条 1px 分隔线，
+      // 位置正好压在输入栏下沿，观感就是输入栏底下多出一条白线。
+      // 这条线属于 HdsTabs，barHeight(0) / barVisible(false) 都关不掉，只有 divider 能关。
+      .divider({ mode: DividerMode.NONE })
       // 进会话页等场景要收起底栏（收高度）。
       // （23+ 另有 controller.applyHideAnimation 能带动画，等这一步验完再加。）
       .barHeight(this.dockBarOpen && !this.leftFloatingDock() && !this.immersiveDockHidden() ? DOCK_H : 0)
       // **一次都不设 barWidth**，交给修饰器按 sideBarWidth 决定（横排恒传 null）。
       // 依据见 HdsTabsFloatingOptions.sideBarWidth 里抄的官方两段。
       .attributeModifier(new HdsTabsFloatingModifier({
-        bottomMargin: Math.max(DOCK_GAP, Math.round(this.bottomSafe * 0.7)),
+        bottomMargin: Math.max(DOCK_GAP, Math.round(this.bottomSafe * 0.95)),
         sideBarWidth: null,
         // 没有迷你条时复用迁移前那套留白算法（胶囊宽度回到原来的比例）；
         // 有迷你条时放开，否则页签和播放条挤在一起会重叠。
@@ -1254,13 +1264,15 @@ export struct MainScreen {
         .vertical(false)
         .barMode(BarMode.Fixed)
         .barPosition(BarPosition.End)
+        // 同上：分栏这条自绘胶囊也有同一条分隔线。
+        .divider({ mode: DividerMode.NONE })
         .barHeight(DOCK_H)
         // 分栏下音乐胶囊挂在居中的页签栏右侧，合起来重心偏右；这里把整条往左
         // 挪半个胶囊宽补偿（只在「四格 + 胶囊」这一态，展开态页签已被 HDS 收成一格）。
 
         // 补偿（只在「四格 + 胶囊」这一态；播放条展开时页签已被 HDS 收成一格）。
         .attributeModifier(new HdsTabsFloatingModifier({
-          bottomMargin: Math.max(DOCK_GAP, Math.round(this.bottomSafe * 0.7)),
+          bottomMargin: Math.max(DOCK_GAP, Math.round(this.bottomSafe * 0.95)),
           sideBarWidth: null,
           // 与手机端同一套留白规则：有迷你条时放开到 MINI_SIDE_MARGIN，否则页签和播放条叠在一起。
           sideMargin: this.miniBarActive() ? MINI_SIDE_MARGIN : this.dockPadding(),
@@ -1295,7 +1307,15 @@ export struct MainScreen {
           }
         })
         .width(this.dockWidth())
-        .height(DOCK_H + 24)
+        // 【2026-11-19 胶囊顶被截掉一截】这里原来写死 DOCK_H + 24（80vp）。
+        // 悬浮胶囊在组件里占的高度是 DOCK_H + bottomMargin，而 bottomMargin
+        // 现在是 max(DOCK_GAP, round(bottomSafe * 0.95))；平板 bottomSafe≈26vp 时
+        // 56 + 25 = 81vp > 80vp，超出的部分被组件上沿**裁掉**——真机截图实测：
+        // TabBar 布局上沿 1665，玻璃却从 1670（＝本组件上沿）才开始画，胶囊顶
+        // 成了一条直线（原本该是圆角），用户看到的就是「被截掉一部分」。
+        // 比例从 0.85 提到 0.95 之前 56+22=78 < 80 正好不溢出，所以这毛病是
+        // 随底距调整才出现的。改成跟 bottomMargin 联动、恒定留 8vp 余量。
+        .height(DOCK_H + Math.max(DOCK_GAP, Math.round(this.bottomSafe * 0.95)) + 8)
         // 【2026-11-09 全屏视频时收底栏】分栏这条胶囊是**自绘**的、直接挂在根
         // Stack 上，层级比 ChatPage 里的媒体查看器高：查看器盖满窗口之后，
         // 它还浮在视频上（真机截图 c7：视频满屏、左下四格 + 音乐球仍在）。
@@ -1317,7 +1337,7 @@ export struct MainScreen {
           .width(168)
           .height(DOCK_H + 24)
           .backgroundColor(Color.Transparent)
-          .margin({ bottom: Math.max(DOCK_GAP, Math.round(this.bottomSafe * 0.7)) })
+          .margin({ bottom: Math.max(DOCK_GAP, Math.round(this.bottomSafe * 0.95)) })
           .onClick((): void => {
             collapseMiniBar(this.railController);
             collapseMiniBar(this.controller);
