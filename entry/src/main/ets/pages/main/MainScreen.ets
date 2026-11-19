@@ -275,12 +275,32 @@ export struct MainScreen {
 
   // 统一发布 resolvedLayout（单一布局系统，无总开关）。窗口、断点、模式、实测
   // 列表宽任一变化都要重发，否则页面读到的是上一轮的值。
+  // 上一次算出来的 dock 形态（分栏左栏胶囊 / 单栏底部栏）。布局在两者之间翻面时
+  // 要重跑一遍揭示流程，见 syncResolvedLayout。
+  private dockModeFloating: boolean = false;
+
   private syncResolvedLayout(): void {
     publishLayoutState(currentDeviceClass(), this.screenW, this.screenH, this.navBarWidth);
     // 布局变了，合法组合也跟着变（平板转竖屏、拉窄窗口、开强制单栏、拖分割线
     // 都可能把 split 翻面）。这里自愈一次：单栏收掉左栏、分栏把残留的 tab === 3
     // 投回左栏资料。幂等，见 util/navState 的 I1–I3。
     reconcile();
+    // 布局翻面（分栏 ⇄ 单栏）会换一条 dock 渲染路径：分栏那条 HdsTabs 的栏高恒为
+    // DOCK_H，单栏这条读 dockBarOpen。不在这里重算，用户从「自动」切到「单栏」再
+    // 退回主界面时，主 Tabs 会停在旧的 barHeight=0 / barVisible=false 上——就是
+    // 折叠屏用户报的「导航条不见了」（2026-11-19）。形态真的翻面时把揭示流程重置
+    // 一遍再同步，让 barHeight 0 → DOCK_H 重新走完两拍；同形态的断点变化只做幂等
+    // syncDock。
+    const floating: boolean = this.leftFloatingDock();
+    if (floating !== this.dockModeFloating) {
+      this.dockModeFloating = floating;
+      this.dockRevealSeq++;
+      this.dockRevealPending = false;
+      this.dockShown = false;
+      this.dockMounted = false;
+      this.dockBarOpen = false;
+    }
+    this.syncDock();
   }
 
   aboutToAppear(): void {
