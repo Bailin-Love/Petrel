@@ -16,6 +16,7 @@
 // prevTriple 从已发布的 resolvedLayout 读取，不额外加持久化键。
 
 import { deviceInfo } from '@kit.BasicServicesKit';
+import { display } from '@kit.ArkUI';
 import {
   DEVICE_2IN1, LAYOUT_AUTO, LAYOUT_DOUBLE, LAYOUT_MULTI, LAYOUT_SINGLE, LAYOUT_TRIPLE,
   PaneResolution, capsuleWidth, deviceClassOf, profilePresentation, resolvePaneLayout
@@ -34,12 +35,30 @@ export const KEY_RESOLVED_CHAT_W: string = 'resolvedChatW';
 export const KEY_RESOLVED_REASON: string = 'resolvedLayoutReason';
 
 // 当前设备类别。deviceInfo.deviceType 失败时按手机处理（最保守）。
+//
+// 折叠屏手机（Pura X 这类）展开后 deviceType 仍是 'phone'。若照直返回手机，
+// 「自动」布局会永远解析成单栏，用户看到的就是「折叠/分屏模式没了」。展开态
+// 按平板处理：auto 目标变双栏；窗口几何不够时 resolvePaneLayout 的 canDouble
+// 仍会把它降回单栏，所以外屏（折叠态）行为不变。
 export function currentDeviceClass(): string {
+  let raw: string = 'phone';
   try {
-    return deviceClassOf(deviceInfo.deviceType);
+    raw = deviceInfo.deviceType;
   } catch (e) {
     return 'phone';
   }
+  const cls: string = deviceClassOf(raw);
+  if (cls !== 'phone') {
+    return cls;
+  }
+  try {
+    if (display.isFoldable() && display.getFoldStatus() === display.FoldStatus.FOLD_STATUS_EXPANDED) {
+      return 'tablet';
+    }
+  } catch (e) {
+    // 非折叠设备或老 API：按手机处理。
+  }
+  return 'phone';
 }
 
 // 解析时该用哪份列表宽：三栏偏好（multi / 历史 triple，含 auto 的 2in1 目标）
