@@ -7,7 +7,7 @@ export class DrawnFileMessageSource {
   private body: DrawnRichSource | null | undefined = undefined;
   private cached: DrawnRichSource | null = null;
   private widget: DrawnDocumentWidget = { key: 'message-file', kind: 'message-file',
-    name: '', mimeType: '', size: 0, latitude: 0, longitude: 0, zoom: 0, width: 262, height: 80 };
+    name: '', mimeType: '', size: 0, latitude: 0, longitude: 0, zoom: 0, width: 262, height: 60 };
 
   constructor(audio: boolean = false) {
     if (audio) { this.widget = { key: 'message-audio', kind: 'message-audio', name: '', mimeType: '', size: 0,

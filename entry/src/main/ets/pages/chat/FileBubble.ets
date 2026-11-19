@@ -222,6 +222,8 @@ export struct FileBubble {
   .width(this.fitAvailableWidth ? Math.max(0, this.maxWidth) : Math.max(190, Math.min(262, this.maxWidth)))
   .alignItems(VerticalAlign.Center)
   // 右侧给动作按钮留位（28vp + 间距），其余交给时间浮层。
-  .padding({ top: 1, bottom: 10, right: this.uploading || this.downloadActive ? 12 : 4 });
+  // 上下留白与行高对齐：计划里 message-file 预留 60vp，内容 48 + 6 + 6 正好填满，
+  // 不再留出底部那截空白（用户 2026-11-19 报「文件气泡底部大片空白」）。
+  .padding({ top: 6, bottom: 6, right: this.uploading || this.downloadActive ? 12 : 4 });
 }
 }
