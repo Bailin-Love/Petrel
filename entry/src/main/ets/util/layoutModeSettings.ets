@@ -1,58 +1,37 @@
-// 布局模式的持久化键、读取封装与迁移状态机（P0）。
+// 布局模式的持久化键、读取封装与迁移状态机。
 //
-// 8 个键、默认值、迁移判据集中在这里，页面与 store 不直接写字符串：
+// 4 个键、默认值、迁移判据集中在这里，页面与 store 不直接写字符串：
 //   layoutMode           auto / single / multi（默认 auto；历史 double / triple 归一为 multi）
 //   navWidthDouble       双栏列表宽，328–440（默认 360）
-//   navWidthTriple       三栏列表宽，328–440（默认 360）
-//   infoWidth            信息栏宽，300–400（默认 340）
-//   infoVisible          旧布局资料栏显隐（兼容键，新布局不读它做判据）
-//   infoColumnOpen       聊天页右侧资料列的用户开合（默认 true，不参与布局解析）
-//   layout_v2_enabled    新多栏外壳总开关（实施期默认 false）
+//   layout_v2_enabled    新多栏外壳总开关（历史键，现已恒为单一布局系统）
 //   layoutMigratedV1     迁移标记：旧 forceSingleColumn 是否已迁移过一次
 //
-// 【唯一数据源】新布局启用后：layoutMode 是唯一用户偏好；resolvedLayout 只在
-// 运行时由 paneLayout.resolvePaneLayout 解析；infoVisible 是
-// (resolvedLayout === 'triple') 的派生结果，不再有独立开关。
+// 【唯一数据源】layoutMode 是唯一用户偏好；resolvedLayout 只在运行时由
+// paneLayout.resolvePaneLayout 解析。2026-11-21 起右侧资料列（第三栏）已删除，
+// 不再有 infoWidth / infoVisible / infoColumnOpen 这些键。
 //
 // 【读路径禁止回写】本文件只读 AppStorage，不 persist、不写旧键。迁移只发生在
 // AppSettings.initSettings 启动装载时；迁移写盘由 AppSettings 负责（必须 await
 // Preferences 的 put/flush 才能分辨成功与失败）。用户改模式时才由 setLayoutMode
 // 落盘并双写旧键。
-//
-// 【双键并存期】P0–P4 期间旧页面仍读 KEY_FORCE_SINGLE_COLUMN（13 处），所以
-// setLayoutMode 要双写；读旧键的页面不需要感知新模式。
 
 import {
-  DEVICE_2IN1, DEVICE_PHONE, DEVICE_TABLET, LAYOUT_AUTO, LAYOUT_SINGLE, LAYOUT_TRIPLE,
-  autoTarget, deviceClassOf, infoVisibleDefault, legacyForceSingleFor, normalizeLayoutMode,
-  sanitizeInfoWidth, sanitizeNavWidth
+  DEVICE_2IN1, DEVICE_PHONE, DEVICE_TABLET, LAYOUT_AUTO, LAYOUT_SINGLE,
+  autoTarget, deviceClassOf, legacyForceSingleFor, normalizeLayoutMode, sanitizeNavWidth
 } from './paneLayout';
 
 export const KEY_LAYOUT_MODE: string = 'layoutMode';
 export const KEY_NAV_WIDTH_DOUBLE: string = 'navWidthDouble';
-export const KEY_NAV_WIDTH_TRIPLE: string = 'navWidthTriple';
-export const KEY_INFO_WIDTH: string = 'infoWidth';
-export const KEY_INFO_VISIBLE: string = 'infoVisible';
-// 聊天页右侧资料列的开合偏好（2026-11-08 三档化）。默认开；持久化、全局，
-// 不随会话重置。它只控制"第三栏画不画"，**不得**喂给 resolvePaneLayout：
-// 否则收起/展开会让布局重新解析一遍，窗口宽度没变却重算栏位，画面会抖。
-export const KEY_INFO_COLUMN_OPEN: string = 'infoColumnOpen';
 export const KEY_LAYOUT_V2: string = 'layout_v2_enabled';
 export const KEY_LAYOUT_MIGRATED_V1: string = 'layoutMigratedV1';
 
 export const LAYOUT_MODE_DEFAULT: string = LAYOUT_AUTO;
 export const NAV_WIDTH_DOUBLE_DEFAULT: number = 360;
-export const NAV_WIDTH_TRIPLE_DEFAULT: number = 360;
-export const INFO_WIDTH_DEFAULT: number = 340;
-export const INFO_VISIBLE_DEFAULT: boolean = false;
 export const LAYOUT_V2_DEFAULT: boolean = false;
 
 export interface LayoutSettingsSnapshot {
   mode: string;
   navWidthDouble: number;
-  navWidthTriple: number;
-  infoWidth: number;
-  infoVisible: boolean;
   enabled: boolean;
 }
 
@@ -64,51 +43,22 @@ export function readLayoutSettings(): LayoutSettingsSnapshot {
     navWidthDouble: sanitizeNavWidth(
       AppStorage.get<number>(KEY_NAV_WIDTH_DOUBLE) ?? NAV_WIDTH_DOUBLE_DEFAULT,
       NAV_WIDTH_DOUBLE_DEFAULT),
-    navWidthTriple: sanitizeNavWidth(
-      AppStorage.get<number>(KEY_NAV_WIDTH_TRIPLE) ?? NAV_WIDTH_TRIPLE_DEFAULT,
-      NAV_WIDTH_TRIPLE_DEFAULT),
-    infoWidth: sanitizeInfoWidth(AppStorage.get<number>(KEY_INFO_WIDTH) ?? INFO_WIDTH_DEFAULT),
-    infoVisible: AppStorage.get<boolean>(KEY_INFO_VISIBLE) ?? INFO_VISIBLE_DEFAULT,
     enabled: true // 单一布局系统：运行时无新旧布局总开关
   };
-}
-
-// 资料栏派生（新布局）：只由实际生效布局决定，没有第二数据源。
-export function infoVisibleFor(resolvedLayout: string): boolean {
-  return resolvedLayout === LAYOUT_TRIPLE;
-}
-
-// 当前生效的信息栏开合。
-//   enabled=true ：严格等于 resolvedLayout==='triple'；设备默认值与
-//                  KEY_INFO_VISIBLE 一律不参与（P0-2）。
-//   enabled=false：旧布局回滚路径，保留旧版「设备默认 + 用户显式值」表达式；
-//                  新 UI 不读这条分支，只为回滚兼容保留。
-export function effectiveInfoVisible(enabled: boolean, resolvedLayout: string,
-  storedVisible: boolean, device: string): boolean {
-  if (enabled) {
-    return infoVisibleFor(resolvedLayout);
-  }
-  return storedVisible || infoVisibleDefault(device);
 }
 
 // 启动装载用的最终值。不写盘，只返回应该放进 AppStorage 的值。
 export interface LayoutBootValues {
   mode: string;
   navWidthDouble: number;
-  navWidthTriple: number;
-  infoWidth: number;
-  infoVisible: boolean;
   enabled: boolean;
 }
 
-export function bootLayoutValues(planMode: string, storedDouble: number, storedTriple: number,
-  storedInfo: number, storedVisible: boolean, enabled: boolean): LayoutBootValues {
+export function bootLayoutValues(planMode: string, storedDouble: number,
+  enabled: boolean): LayoutBootValues {
   return {
     mode: normalizeLayoutMode(planMode),
     navWidthDouble: sanitizeNavWidth(storedDouble, NAV_WIDTH_DOUBLE_DEFAULT),
-    navWidthTriple: sanitizeNavWidth(storedTriple, NAV_WIDTH_TRIPLE_DEFAULT),
-    infoWidth: sanitizeInfoWidth(storedInfo),
-    infoVisible: storedVisible,
     enabled: enabled
   };
 }
@@ -193,7 +143,7 @@ export function planLayoutMigration(state: LayoutMigrationState): LayoutMigratio
   };
 }
 
-// 设备目标，供设置页显示「自动 = 手机单栏 / 平板双栏 / 电脑三栏」文案。
+// 设备目标，供设置页显示「自动 = 手机单栏 / 平板与电脑双栏」文案。
 export function autoTargetFor(device: string): string {
   return autoTarget(device);
 }

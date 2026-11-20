@@ -56,7 +56,6 @@ import { KEY_APP_DARK } from '../../util/theme';
 
 import { rememberSplitNavWidth } from '../../util/splitNavWidth';
 import { paneNavMax, paneNavMin, paneNavWidth } from '../../util/paneNavWidth';
-import { KEY_INFO_WIDTH } from '../../util/layoutModeSettings';
 import { APPEARANCE_EPOCH } from '../../util/appearance';
 import { mainPageFill } from '../../util/theme';
 import { KEY_APP_BG_ON } from '../../store/AppSettings';
@@ -565,13 +564,9 @@ export struct SettingsPage {
   }
 
   // 全应用共用一条可拖动分隔线：宽度记在 KEY_SPLIT_NAV_WIDTH；
-  // 区间随是否三栏变化（三栏要给右侧资料列与聊天留空间）。
-  private paneTriple(): boolean {
-    return (AppStorage.get<string>('resolvedLayout') ?? '') === 'triple';
-  }
-
+  // 区间由窗口宽决定（要同时给列表最小宽与聊天最小宽）。
   private paneNavMaxW(): number {
-    return paneNavMax(this.screenW, this.paneTriple(), AppStorage.get<number>(KEY_INFO_WIDTH) ?? 340);
+    return paneNavMax(this.screenW);
   }
 
   private paneNavMinW(): number {

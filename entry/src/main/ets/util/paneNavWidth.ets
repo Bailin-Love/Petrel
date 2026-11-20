@@ -2,18 +2,16 @@
 //
 // 语义：
 // - 宽度只记一份（KEY_SPLIT_NAV_WIDTH），三个页签共享；拖一次，其它页签跟着变。
-// - 区间由当前窗口宽、是否三栏（右侧资料列占宽）共同决定；夹在 [328, 440]。
-// - 三栏时给聊天留 >= 560vp；双栏时整窗都可用。
-// 详情页（资料列）不参与这条线，它是第三栏，不属于导航分栏。
+// - 区间只由当前窗口宽决定；夹在 [328, 434]。
+// - 双栏时给聊天留 >= 560vp。
 export const NAV_MIN_VP: number = 328;
 // 434 而非 440：再宽左栏会让底部悬浮胶囊在观感上明显偏右，用户要求锁在当前值。
 export const NAV_MAX_VP: number = 434;
 export const CHAT_MIN_VP: number = 560;
-export const INFO_DIVIDER_VP: number = 2;
 
-// 当前布局下左栏可拖动的最大宽。三栏要扣掉资料列与聊天最小宽。
-export function paneNavMax(screenW: number, triple: boolean, infoW: number): number {
-  const usable: number = triple ? screenW - infoW - INFO_DIVIDER_VP : screenW;
+// 当前布局下左栏可拖动的最大宽：整窗减去聊天最小宽。
+export function paneNavMax(screenW: number): number {
+  const usable: number = screenW;
   if (!(usable > 0)) {
     return NAV_MIN_VP;
   }

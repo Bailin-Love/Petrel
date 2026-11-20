@@ -44,16 +44,13 @@ import {
   SURFACE_GLASS_LEVEL_DEFAULT, SURFACE_GLASS_ON_DEFAULT
 } from '../util/surfaceGlass';
 import {
-  INFO_WIDTH_DEFAULT, KEY_INFO_COLUMN_OPEN, KEY_INFO_VISIBLE, KEY_INFO_WIDTH, KEY_LAYOUT_MIGRATED_V1,
-  KEY_LAYOUT_MODE, KEY_NAV_WIDTH_DOUBLE, KEY_NAV_WIDTH_TRIPLE, LAYOUT_MODE_DEFAULT,
-  NAV_WIDTH_DOUBLE_DEFAULT, NAV_WIDTH_TRIPLE_DEFAULT, bootLayoutValues,
-  legacyValueFor, planLayoutMigration
+  KEY_LAYOUT_MIGRATED_V1, KEY_LAYOUT_MODE, KEY_NAV_WIDTH_DOUBLE, LAYOUT_MODE_DEFAULT,
+  NAV_WIDTH_DOUBLE_DEFAULT, bootLayoutValues, legacyValueFor, planLayoutMigration
 } from '../util/layoutModeSettings';
 import type { LayoutMigrationPlan, LayoutMigrationState } from '../util/layoutModeSettings';
 import { clearResolvedLayout } from '../util/layoutState';
 import {
-  LAYOUT_AUTO, LAYOUT_DOUBLE, LAYOUT_MULTI, LAYOUT_SINGLE, LAYOUT_TRIPLE, normalizeLayoutMode,
-  sanitizeInfoWidth, sanitizeNavWidth
+  LAYOUT_AUTO, LAYOUT_DOUBLE, LAYOUT_MULTI, LAYOUT_SINGLE, normalizeLayoutMode, sanitizeNavWidth
 } from '../util/paneLayout';
 
 export { KEY_HIDE_PINNED_DEFAULT } from '../util/pinnedVisibilityState';
@@ -451,10 +448,7 @@ const DATA_BOOLEAN_TRUE_DEFAULTS: string[] = [
   // 音乐/语音/直播默认续播（符合平台惯例）；视频默认不续播。
   KEY_BG_PLAY_MUSIC,
   KEY_BG_PLAY_VOICE,
-  KEY_BG_PLAY_LIVE,
-  // 聊天页右侧资料列默认展开。三档化后第三栏只在聊天页出现，用户用顶栏那颗
-  // 「▯｜」键自己收起；这是它唯一的持久化偏好（全局，不随会话重置）。
-  KEY_INFO_COLUMN_OPEN
+  KEY_BG_PLAY_LIVE
 ];
 
 // 平板/宽屏强制单栏（用户要求）：分栏那条路上的媒体查看器走全模态、标题栏不收，
@@ -595,7 +589,7 @@ async function readLayoutMigrationState(s: preferences.Preferences): Promise<Lay
   // 别名继续算有效——老版本存下的值不该被当成损坏配置清掉，boot 时由
   // normalizeLayoutMode 统一改成 'multi'。
   const modeValid: boolean = persistedMode === LAYOUT_SINGLE || persistedMode === LAYOUT_DOUBLE ||
-    persistedMode === LAYOUT_TRIPLE || persistedMode === LAYOUT_MULTI ||
+    persistedMode === 'triple' || persistedMode === LAYOUT_MULTI ||
     persistedMode === LAYOUT_AUTO;
   return {
     enabled: enabled,
@@ -639,15 +633,9 @@ export async function initSettings(context: common.Context): Promise<void> {
     const migrationPlan: LayoutMigrationPlan = await runLayoutMigration(s);
     const bootLayout = bootLayoutValues(migrationPlan.mode,
       await s.get(KEY_NAV_WIDTH_DOUBLE, NAV_WIDTH_DOUBLE_DEFAULT) as number,
-      await s.get(KEY_NAV_WIDTH_TRIPLE, NAV_WIDTH_TRIPLE_DEFAULT) as number,
-      await s.get(KEY_INFO_WIDTH, INFO_WIDTH_DEFAULT) as number,
-      await s.get(KEY_INFO_VISIBLE, false) as boolean,
       true);
     AppStorage.setOrCreate(KEY_LAYOUT_MODE, bootLayout.mode);
     AppStorage.setOrCreate(KEY_NAV_WIDTH_DOUBLE, bootLayout.navWidthDouble);
-    AppStorage.setOrCreate(KEY_NAV_WIDTH_TRIPLE, bootLayout.navWidthTriple);
-    AppStorage.setOrCreate(KEY_INFO_WIDTH, bootLayout.infoWidth);
-    AppStorage.setOrCreate(KEY_INFO_VISIBLE, bootLayout.infoVisible);
     AppStorage.setOrCreate(KEY_BUBBLE_RADIUS, await s.get(KEY_BUBBLE_RADIUS, RADIUS_DEFAULT) as number);
     AppStorage.setOrCreate(KEY_THREE_LINES, await s.get(KEY_THREE_LINES, false) as boolean);
     AppStorage.setOrCreate(KEY_REDUCE_ANIM, await s.get(KEY_REDUCE_ANIM, false) as boolean);
@@ -907,20 +895,6 @@ export function setLayoutMode(mode: string): void {
 
 export function setNavWidthDouble(width: number): void {
   setNumber(KEY_NAV_WIDTH_DOUBLE, sanitizeNavWidth(width, NAV_WIDTH_DOUBLE_DEFAULT));
-}
-
-export function setNavWidthTriple(width: number): void {
-  setNumber(KEY_NAV_WIDTH_TRIPLE, sanitizeNavWidth(width, NAV_WIDTH_TRIPLE_DEFAULT));
-}
-
-export function setInfoWidth(width: number): void {
-  setNumber(KEY_INFO_WIDTH, sanitizeInfoWidth(width));
-}
-
-// 兼容键：新布局启用后资料栏由 resolvedLayout 派生（见 effectiveInfoVisible），
-// 不再读这个开关。保留写入只用于旧布局回滚路径；P1 接线时不要再用它控制第三列。
-export function setInfoVisible(visible: boolean): void {
-  setBoolean(KEY_INFO_VISIBLE, visible);
 }
 
 // 单一布局系统（2026-11-08）：运行期不再有新旧布局总开关。旧键仅作历史
