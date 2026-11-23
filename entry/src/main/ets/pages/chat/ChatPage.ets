@@ -272,7 +272,9 @@ import {
 import { conversationScopeId, conversationScopeKey } from '../../util/messageTopicScope';
 import { navigateToSearch } from '../../util/searchNav';
 import { navigateToSetting } from '../../util/settingsNav';
-import { getActiveTdUserId } from '../../tdkit/Globals';
+import { getActiveTdAccountSlot, getActiveTdUserId } from '../../tdkit/Globals';
+import { isSameChatMessageDragExtra } from '../../util/messageDragOrigin';
+import { DropHoverOverlay, DropHoverState } from './DropHoverOverlay';
 import {
   chatChromeHeight, ChatChromeGeometryInput, chatTopBannerHeight, chatTopicBarHeight
 } from '../../util/ChatChromeGeometry';
@@ -1360,6 +1362,7 @@ export struct ChatPage {
 
   private resetComposerSession(): void {
     this.dropReceiver.cancel();
+    this.dropHover.setVisible(false);
     // 原文四行 `this.recordingSeq++; if (this.voiceRec !== null ||
     // this.isRecording || this.recordingStarting) { this.cancelRecording();
     // }` 收成这一次 `this.recording.cancel()` 调用——voiceRec/recordingSeq
@@ -1627,7 +1630,7 @@ export struct ChatPage {
     });
     this.sessionLifecycle.bind({
       invalidateScrollWork: (): void => { this.timeline.invalidateScrollWork(); },
-      cancelDropReceiver: (): void => { this.dropReceiver.cancel(); },
+      cancelDropReceiver: (): void => { this.dropReceiver.cancel(); this.dropHover.setVisible(false); },
       publishViewerCovered: (): void => { publishViewerCoversWindow(false); },
       disposeShareTargeted: (): void => {
         if (this.offShareTargeted !== null) {
@@ -1994,7 +1997,22 @@ export struct ChatPage {
         this.pendingImeBridgeFromEmoji = false;
       },
       prepareEditor: (): void => { this.prepareComposerEditor(); },
-      focusEditor: (): void => { focusControl.requestFocus('chat_composer'); }
+      focusEditor: (): void => {
+        // 【面板→键盘按钮点了只收起、不弹键盘】根因是时序：prepareEditor() 刚把
+        // composerEditorReady 置 true，真正的 TextArea 要到下一帧才挂上，而
+        // ComposerInputSwitch 的回调是 setTimeout(0)——同一帧内 requestFocus 找不到
+        // 'chat_composer' 这个节点，静默失败，键盘自然不来。这里在下一帧和 120ms
+        // 后各补一次，且只在键盘确实没起来时补，避免和系统抢焦点。
+        focusControl.requestFocus('chat_composer');
+        const retry = (): void => {
+          if (this.showEmojiPanel || this.keyboardH > 0 || this.currentImeOverlap() > 1) {
+            return;
+          }
+          focusControl.requestFocus('chat_composer');
+        };
+        setTimeout(retry, 0);
+        setTimeout(retry, 120);
+      }
     });
     this.command.bind({
       chatId: (): number => this.chatId,
@@ -2033,7 +2051,10 @@ export struct ChatPage {
         this.composerController.stopEditing();
       },
       setComposerFocused: (value: boolean): void => { this.composerFocused = value; },
-      afterSent: (): void => { this.timeline.atBottom = true; },
+      afterSent: (): void => {
+        this.timeline.atBottom = true;
+        this.timeline.armSelfSendFollow();
+      },
       // 与搬之前 start() 里那句 `new VoiceRecorder()` 逐字等价；开成宿主取值器
       // 只是为了让单测能注入一个可手动兑现的假录音器，把 recordingSeq 那道
       // 守卫钉住（理由写在 VoiceRecordingState 的接口上方）。
@@ -2333,6 +2354,45 @@ export struct ChatPage {
   }
 
   // 分享落地要用到的页面能力。两档共用一份。
+  // 拖拽悬停提示的显隐。应用内拖消息也会走到这里，那种拖拽的意思是「搬动这条
+  // 消息」，不能提示「松手即发送」——和 ChatDropReceiver 里的排除判据一致。
+  private setDropHover(visible: boolean, extraParams?: string, sendMode: boolean = true): void {
+    if (this.dropHoverHideTimer >= 0) { clearTimeout(this.dropHoverHideTimer); this.dropHoverHideTimer = -1; }
+    if (visible && isSameChatMessageDragExtra(extraParams, getActiveTdAccountSlot(), this.chatId)) {
+      visible = false;
+    }
+    if (this.dropHover.sendMode !== sendMode) { this.dropHover.sendMode = sendMode; }
+    this.dropHover.setVisible(visible);
+  }
+
+  // 拖进来的东西松手后会不会真的「直接发出」。纯文字/链接拖进来只放进输入框，
+  // 这时提示层不能写「松手即发送」。本地拖拽（含中转站）在进入时就能读到数据；
+  // 系统延迟拖拽这里会抛错，读不到就按「文件」提示——绝大多数情况就是文件。
+  private dropSendsDirectly(event: DragEvent): boolean {
+    try {
+      const records = event.getData().getRecords();
+      if (records.length === 0) { return true; }
+      for (const record of records) {
+        const type = record.getType();
+        if (type !== 'general.plain-text' && type !== 'general.hyperlink' && type !== 'general.html') {
+          return true;
+        }
+      }
+      return false;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  // 此刻拖拽是否真的能被接收。比 onDrop 的谓词少一层「拖拽开始时的 store/client
+  // 快照」——这里只决定要不要给提示，最坏情况是提示出现但松手被拒，而提示本身
+  // 不改变任何数据。
+  private dropHoverAllowed(): boolean {
+    return this.timeline.pageVisible && this.appIsForeground && !this.viewerOpen() &&
+      !this.search.mode && !this.selection.active && this.composer.editingId === 0 &&
+      !this.recording.isRecording && this.membershipState === 'writable';
+  }
+
   private shareHost(store: MessageStore): ShareArrivalHost {
     return {
       checkPermissions: (payload: SharedPayload): Promise<void> => store.checkSharePermissions(payload),
@@ -2981,10 +3041,18 @@ export struct ChatPage {
     // 新消息到达且最后一条已在底部可见：跟随，并解除未读闩。闩防的是缩略图
     // 这类原地通知把分界线贴底滑走（下面那一支仍受它约束）；新消息把内容往上
     // 顶是官方行为，不该被它挡住——真机日志：atBottom=true stayAtUnread=true 不跟随。
+    // 自己刚发出的那条消息：即使此刻 atBottom 是假（列表略离底）也要跟随——发送
+    // 是显式动作，官方行为就是立刻把自己发的那条顶到视口里。
+    const selfSendRecent: boolean = this.timeline.selfSendFollowActive();
+    // 别人发来的新消息：atBottom 是零容差判定，键盘/输入栏高度变化、亚像素取整、
+    // 新行还没把列表顶到位都会让它差几 vp 就翻假，现象就是「新消息落在输入栏
+    // 下面不往上顶」。band 内的偏移（压住输入栏一角、留一小段空隙）仍算在底部。
+    const nearBottom: boolean = !this.viewerOpen() && this.timeline.nearBottomFollow();
     if (notifyKind === 'update' &&
-      bottomFollowShouldSchedule(this.timeline.atBottom, this.timeline.bottomFollowPending, this.viewerOpen())) {
+      (selfSendRecent || nearBottom ||
+        bottomFollowShouldSchedule(this.timeline.atBottom, this.timeline.bottomFollowPending, this.viewerOpen()))) {
       this.timeline.stayAtUnread = false;
-      this.scheduleBottomAfterLayout('L1242');
+      this.scheduleBottomAfterLayout(selfSendRecent ? 'L1242_send' : 'L1242');
     }
   }
 
@@ -3498,6 +3566,8 @@ export struct ChatPage {
     this.shatterStage.dispose();
     this.messageActionsState.reset();
     this.sessionLifecycle.dispose();
+    if (this.dropHoverHideTimer >= 0) { clearTimeout(this.dropHoverHideTimer); this.dropHoverHideTimer = -1; }
+    this.dropHover.dispose();
   }
 
   private disposeInitialStageAndTgs(): void {
@@ -3998,6 +4068,8 @@ export struct ChatPage {
     const overlap: number = Math.max(0, this.fullViewportH - newH);
     if (overlap > this.knownImeH) {
       this.knownImeH = overlap;
+      // 表情面板与键盘等高：键盘占多少，抽屉总高就多少，切换时上沿不动。
+      this.emojiDrawer.setImeHeight(this.knownImeH);
     }
     if (this.emojiDrawer.closingImeToDrawer && overlap <= 1 && this.keyboardH <= 0) {
       this.imeClosingToDrawer = false;
@@ -4059,6 +4131,7 @@ export struct ChatPage {
     const visible: boolean = this.keyboardH > 0;
     if (this.keyboardH > this.knownImeH) {
       this.knownImeH = this.keyboardH;
+      this.emojiDrawer.setImeHeight(this.knownImeH);
     }
     if (wasVisible !== visible) {
       holdPlayerJobs(KEYBOARD_SETTLE_MS);
@@ -5170,6 +5243,12 @@ export struct ChatPage {
   @Local panelContentReady: boolean = false;
   private emojiDrawer: EmojiDrawerState = new EmojiDrawerState();
   private dropReceiver: ChatDropReceiver = new ChatDropReceiver();
+  // 拖拽悬停提示层的显隐状态。放在 @ObservedV2 类里由提示层自己订阅：让页面 build
+  // 直接读它的话，拖拽每次进出都会重跑整页 build。
+  private dropHover: DropHoverState = new DropHoverState();
+  // 拖拽在页面子节点之间移动时 enter/leave 可能连续抖动；离开只在停住 160ms 后
+  // 才收起提示层，避免提示闪一下。
+  private dropHoverHideTimer: number = -1;
   private inputSwitch: ComposerInputSwitch = new ComposerInputSwitch();
   private panelReadySeq: number = 0;
 
@@ -5327,9 +5406,14 @@ export struct ChatPage {
   }
 
   private composerBottomGap(): number {
-    const tightForIme: boolean = (this.keyboardH > 0 && this.emojiDrawer.activeSlot === '') ||
-      this.drawerClosingToIme;
-    if (tightForIme) {
+    // 键盘起来、或底部抽屉（表情/附件）打开/正在开合时，一律贴住下方那条边。
+    // **面板打开时也要走 6vp**：抽屉不再向上叠（drawerTopOverlap 恒 0），面板
+    // 卡片顶沿与键盘顶沿落在同一条线上，如果这时候还用 25vp 的悬浮导航栏基准，
+    // 输入栏到面板的缝就比到键盘的缝宽 19vp，来回切时会一跳一跳。
+    const drawerActive: boolean = this.emojiDrawer.shellHeight > 0 ||
+      this.emojiDrawer.activeSlot !== '' || this.drawerClosingToIme ||
+      this.emojiDrawer.closingImeToDrawer;
+    if (this.keyboardH > 0 || drawerActive) {
       // 键盘/抽屉起来时贴住它们，不留安全区（原因见 util/composerChrome 的注释）。
       return COMPOSER_GAP_TIGHT;
     }
@@ -5472,6 +5556,7 @@ export struct ChatPage {
         } else if (this.keyboardH > this.knownImeH) {
           this.knownImeH = this.keyboardH;
         }
+        this.emojiDrawer.setImeHeight(this.knownImeH);
         this.emojiDrawer.closingImeToDrawer = true;
         this.armImeBridgeTimer(Math.max(320, settle + 120));
       } else {
@@ -5678,6 +5763,7 @@ export struct ChatPage {
           if (this.draft === draft) { this.draft = ''; this.mention.clearPendingNameMentions(); }
           if (this.composer.replyToId === replyId) { this.composer.clearReply(); }
           this.timeline.atBottom = true;
+          this.timeline.armSelfSendFollow();
         }
       } catch (error) {
         if (!submitted && lease !== null) {
@@ -5716,6 +5802,7 @@ export struct ChatPage {
     if (!needsLatestWindow) {
       this.timeline.atBottom = true;
       this.timeline.stayAtUnread = false;
+      this.timeline.armSelfSendFollow();
     }
     this.withSendLock((): Promise<void> => store.sendMedia(items, caption, replyId).then((): void => {
       this.pendingMedia = clearPendingMedia();
@@ -5769,6 +5856,9 @@ export struct ChatPage {
     if (!needsLatestWindow) {
       this.timeline.atBottom = true;
       this.timeline.stayAtUnread = false;
+      // 发送是显式动作：接下来这条自己发的消息必须被看见，哪怕此刻列表只差几像素
+      // 没贴到底（isAtEnd() 会因此判「不在底部」）。窗口内跟随不再问 atBottom。
+      this.timeline.armSelfSendFollow();
     }
     // 按名字提及的实体在这里生成：偏移必须相对**实际发出去的那串文本**，
     // 所以用 trim 之后的 text，不是原始草稿。
@@ -7120,6 +7210,13 @@ export struct ChatPage {
       if (this.viewerOpen()) {
         this.mediaViewer();
       }
+      // 拖拽悬停提示层。放在根 Stack 最后一个：盖住顶栏与输入栏，自身
+      // hitTestBehavior(None)，不参与命中也不吃点击。
+      DropHoverOverlay({
+        state: this.dropHover,
+        target: this.header.titleTextOf(),
+        dark: this.appDark
+      });
     }
     .width('100%').height('100%')
     .onSizeChange((_old: SizeOptions, size: SizeOptions): void => {
@@ -7130,6 +7227,8 @@ export struct ChatPage {
     })
     .allowDrop(CHAT_DROP_TYPES)
     .onDrop((event: DragEvent, extraParams?: string): void => {
+      // 松手：提示立刻收起，接收器在同一帧里开始读暂存文件并直接发出。
+      this.dropHover.setVisible(false);
       const store = this.store;
       if (store === null) { event.setResult(DragResult.DRAG_FAILED); return; }
       const client = getTdClient();
@@ -7139,7 +7238,19 @@ export struct ChatPage {
         (): boolean => this.store === store && getTdClient() === client && this.chatId === chatId && this.threadRootId === threadId &&
           this.timeline.pageVisible && this.appIsForeground && !this.viewerOpen() && !this.search.mode && !this.selection.active &&
           this.composer.editingId === 0 && !this.recording.isRecording && this.membershipState === 'writable',
-        this.header.titleTextOf(), chatId, extraParams);
+        chatId, extraParams);
+    })
+    // 悬停提示：拖拽进入页面就亮出「松手即发送」，离开或松手收起。onDragEnter
+    // 只在组件上已有 onDrop 时才会回调。
+    .onDragEnter((event: DragEvent, extraParams?: string): void => {
+      this.setDropHover(this.dropHoverAllowed(), extraParams, this.dropSendsDirectly(event));
+    })
+    .onDragLeave((): void => {
+      if (this.dropHoverHideTimer >= 0) { return; }
+      this.dropHoverHideTimer = setTimeout((): void => {
+        this.dropHoverHideTimer = -1;
+        this.setDropHover(false);
+      }, 160);
     })
     // 贴纸合集面板挂在页面根 Stack 上：这个节点还没有别的 bindSheet（骰子那张
     // 挂 dock），同一节点上串两个只有最后一个生效。
