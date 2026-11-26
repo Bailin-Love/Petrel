@@ -27,7 +27,8 @@ import { backgroundKeepAlive, KeepAliveResult } from '../services/BackgroundKeep
 import { startCrashWatch } from '../services/crashReport';
 import { initDiagLog } from '../util/log';
 import {
-  initSettings, refreshPowerSavingState, KEY_BACKGROUND_KEEP_ALIVE, KEY_CACHE_LIMIT, setBoolean
+  initSettings, refreshPowerSavingState, KEY_BACKGROUND_KEEP_ALIVE_MODE,
+  KEEP_ALIVE_OFF, KEY_CACHE_LIMIT
 } from '../store/AppSettings';
 import { migrateLegacyAppWallpaperStates } from '../store/ChatBackgroundStore';
 import { CACHE_LIMIT_DEFAULT, shouldTrimNow } from '../store/CacheLimit';
@@ -104,17 +105,16 @@ export default class EntryAbility extends UIAbility {
     initSettings(this.context).then((): void => {
       migrateLegacyAppWallpaperStates();
       proxyAutoSwitchService.settingsChanged();
-      // 后台保活是显式选项：只有上次真的打开过才恢复。上下文要在这里注入，
-      // 用户之后在「省电 → 后台持续运行」里开关时直接可用。
+      // 后台保活是显式选项：只有上次真的选过模式才恢复。上下文要在这里注入，
+      // 用户之后在「省电 → 后台持续运行」里切换时直接可用。
       backgroundKeepAlive.init(this.context);
-      if (AppStorage.get<boolean>(KEY_BACKGROUND_KEEP_ALIVE) === true) {
-        backgroundKeepAlive.start().then((res: KeepAliveResult): void => {
-          if (!res.ok) {
-            // 换设备/系统策略变化后不再支持：把开关回退成关闭，避免下次又试。
-            setBoolean(KEY_BACKGROUND_KEEP_ALIVE, false);
-          }
+      const keepAliveMode: string =
+        AppStorage.get<string>(KEY_BACKGROUND_KEEP_ALIVE_MODE) ?? KEEP_ALIVE_OFF;
+      if (keepAliveMode !== KEEP_ALIVE_OFF) {
+        // 失败时服务内部会把模式回退成 off 并持久化：换设备、撤回定位权限、
+        // 系统关掉定位后都不该在下次启动继续重试。这里只负责发起。
+        backgroundKeepAlive.start(keepAliveMode).then((_res: KeepAliveResult): void => {
         }).catch((): void => {
-          setBoolean(KEY_BACKGROUND_KEEP_ALIVE, false);
         });
       }
     }).catch((error: Error): void => {
