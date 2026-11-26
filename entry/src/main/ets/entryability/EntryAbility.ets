@@ -23,9 +23,12 @@ import { clearLinkPreviewPresentationCache } from '../util/linkPreview';
 import { refreshLocale } from '../util/intlFormat';
 import { bumpLanguageEpoch } from '../util/appLanguage';
 import { backgroundGraceTask } from '../services/BackgroundGraceTask';
+import { backgroundKeepAlive, KeepAliveResult } from '../services/BackgroundKeepAlive';
 import { startCrashWatch } from '../services/crashReport';
 import { initDiagLog } from '../util/log';
-import { initSettings, refreshPowerSavingState, KEY_CACHE_LIMIT } from '../store/AppSettings';
+import {
+  initSettings, refreshPowerSavingState, KEY_BACKGROUND_KEEP_ALIVE, KEY_CACHE_LIMIT, setBoolean
+} from '../store/AppSettings';
 import { migrateLegacyAppWallpaperStates } from '../store/ChatBackgroundStore';
 import { CACHE_LIMIT_DEFAULT, shouldTrimNow } from '../store/CacheLimit';
 import { applyCacheLimit } from '../store/StorageApi';
@@ -101,6 +104,19 @@ export default class EntryAbility extends UIAbility {
     initSettings(this.context).then((): void => {
       migrateLegacyAppWallpaperStates();
       proxyAutoSwitchService.settingsChanged();
+      // 后台保活是显式选项：只有上次真的打开过才恢复。上下文要在这里注入，
+      // 用户之后在「省电 → 后台持续运行」里开关时直接可用。
+      backgroundKeepAlive.init(this.context);
+      if (AppStorage.get<boolean>(KEY_BACKGROUND_KEEP_ALIVE) === true) {
+        backgroundKeepAlive.start().then((res: KeepAliveResult): void => {
+          if (!res.ok) {
+            // 换设备/系统策略变化后不再支持：把开关回退成关闭，避免下次又试。
+            setBoolean(KEY_BACKGROUND_KEEP_ALIVE, false);
+          }
+        }).catch((): void => {
+          setBoolean(KEY_BACKGROUND_KEEP_ALIVE, false);
+        });
+      }
     }).catch((error: Error): void => {
       // initSettings 自己已经装好默认值；这里防住未来实现改成向外抛错时的未处理
       // Promise，启动不能因为一次设置迁移失败而中断。
@@ -367,6 +383,8 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    // 进程都要没了，常驻任务没有意义；撤掉通知栏里那条「正在运行」。
+    backgroundKeepAlive.stop().then((): void => {}).catch((): void => {});
     // 保存任务全吊在这个 ability 的 context 上，ability 一没它们就都是死的，
     // 通知栏里那条进度不撤就永远停在原地（用户转述："总是停留在通知栏"）。
     cancelLiveDownloadNotifications();

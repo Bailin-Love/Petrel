@@ -146,7 +146,8 @@
           "audioPlayback",
           "audioRecording",
           "voip",
-          "location"
+          "location",
+          "taskKeeping"
         ],
         "exported": true,
         "skills": [

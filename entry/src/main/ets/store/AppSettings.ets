@@ -116,6 +116,8 @@ export const KEY_POWER_EFFECT_REACTION: string = 'powerEffectReaction';
 export const KEY_POWER_EFFECT_REPLY: string = 'powerEffectReply';
 export const KEY_POWER_EFFECT_MENU: string = 'powerEffectMenu';
 export const KEY_POWER_EFFECT_BLUR: string = 'powerEffectBlur';
+// 后台持续运行（TASK_KEEPING）。默认关闭；平板/2in1 可用，手机通常返回 9800005。
+export const KEY_BACKGROUND_KEEP_ALIVE: string = 'backgroundKeepAlive';
 // Data & storage. The current network is supplied by NetworkStateService and
 // is intentionally kept in AppStorage only; user choices below are persisted.
 export const KEY_CURRENT_NETWORK_TYPE: string = 'currentNetworkType'; // none | wifi | mobile | roaming | vpn | other
@@ -467,7 +469,8 @@ const DATA_BOOLEAN_FALSE_DEFAULTS: string[] = [
   KEY_PROXY_AUTO_SWITCH,
   KEY_TRANSLATE_CHATS,
   KEY_TRANSLATE_REPLACE_ORIGINAL,
-  KEY_FORCE_SINGLE_COLUMN
+  KEY_FORCE_SINGLE_COLUMN,
+  KEY_BACKGROUND_KEEP_ALIVE
 ];
 
 function applyPowerState(percent: number): void {

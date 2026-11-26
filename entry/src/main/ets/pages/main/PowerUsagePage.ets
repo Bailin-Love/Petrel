@@ -1,4 +1,5 @@
 import {
+  KEY_BACKGROUND_KEEP_ALIVE,
   KEY_BATTERY_PERCENT,
   KEY_POWER_ACTIVE,
   KEY_POWER_CALL_ANIMATIONS,
@@ -31,6 +32,7 @@ import { LANGUAGE_EPOCH } from '../../util/appLanguage';
 import { HdsSubDestination } from '../common/HdsSubDestination';
 import { BLUR_MAX_VP, EDGE_OVERLAY_VP, edgeBlurRadiusOf } from '../../util/scrollEdgeBlur';
 import { ScrollEdgeBlurBinder } from '../../util/scrollEdgeBlurModifier';
+import { backgroundKeepAlive, KeepAliveResult } from '../../services/BackgroundKeepAlive';
 import {
   EDGE_BLUR_BOTTOM_ON_DEFAULT, EDGE_BLUR_FOLLOW, EDGE_BLUR_ON_DEFAULT, EDGE_BLUR_TOP_ON_DEFAULT,
   KEY_EDGE_BLUR_BOTTOM_ON, KEY_EDGE_BLUR_ON, KEY_EDGE_BLUR_OTHER_BOTTOM, KEY_EDGE_BLUR_OTHER_TOP,
@@ -75,6 +77,10 @@ export struct PowerUsagePage {
   @StorageLink(KEY_POWER_THRESHOLD) threshold: number = POWER_THRESHOLD_DEFAULT;
   @StorageProp(KEY_POWER_ACTIVE) active: boolean = false;
   @StorageProp(KEY_BATTERY_PERCENT) batteryPercent: number = 100;
+  // 后台持续运行：独立开关，默认关闭（DATA_BOOLEAN_FALSE_DEFAULTS）。
+  @StorageLink(KEY_BACKGROUND_KEEP_ALIVE) keepAliveOn: boolean = false;
+  @State private keepAliveBusy: boolean = false;
+  @State private keepAliveHint: string = '';
   @StorageLink(KEY_POWER_ANIMATED_AVATAR) animatedAvatar: boolean = true;
   @StorageLink(KEY_POWER_STICKERS) animatedStickers: boolean = true;
   @StorageLink(KEY_POWER_EMOJI) animatedEmoji: boolean = true;
@@ -449,6 +455,90 @@ export struct PowerUsagePage {
     .backgroundColor(CARD_BG).borderRadius(CARD_RADIUS);
   }
 
+  private keepAliveStatusText(): string {
+    if (this.keepAliveBusy) {
+      return str('power_keep_alive_starting');
+    }
+    if (this.keepAliveHint !== '') {
+      return this.keepAliveHint;
+    }
+    return this.keepAliveOn ? str('power_keep_alive_on') : str('power_keep_alive_off');
+  }
+
+  // 打开时才真正申请 TASK_KEEPING。手机端可能返回 9800005（设备策略不支持），
+  // 这时如实提示并保持关闭——不换成 dataTransfer 之类的业务任务来冒充常驻。
+  private toggleKeepAlive(value: boolean): void {
+    if (this.keepAliveBusy) {
+      return;
+    }
+    this.keepAliveBusy = true;
+    this.keepAliveHint = '';
+    // 先让绑定状态跟手，失败时再显式改回；否则 Toggle 会保留自己的视觉开态。
+    this.keepAliveOn = value;
+    if (value) {
+      backgroundKeepAlive.start().then((res: KeepAliveResult): void => {
+        this.keepAliveBusy = false;
+        if (res.ok) {
+          this.keepAliveOn = true;
+          setBoolean(KEY_BACKGROUND_KEEP_ALIVE, true);
+        } else {
+          this.keepAliveOn = false;
+          setBoolean(KEY_BACKGROUND_KEEP_ALIVE, false);
+          this.keepAliveHint = res.code === 9800005
+            ? str('power_keep_alive_unsupported')
+            : str('power_keep_alive_failed', res.code);
+        }
+      }).catch((): void => {
+        this.keepAliveBusy = false;
+        this.keepAliveOn = false;
+        setBoolean(KEY_BACKGROUND_KEEP_ALIVE, false);
+        this.keepAliveHint = str('power_keep_alive_failed', -1);
+      });
+    } else {
+      backgroundKeepAlive.stop().then((): void => {
+        this.keepAliveBusy = false;
+        this.keepAliveOn = false;
+        setBoolean(KEY_BACKGROUND_KEEP_ALIVE, false);
+      }).catch((): void => {
+        this.keepAliveBusy = false;
+        this.keepAliveOn = false;
+        setBoolean(KEY_BACKGROUND_KEEP_ALIVE, false);
+      });
+    }
+  }
+
+  @Builder
+  keepAliveCard() {
+    Column() {
+      Row({ space: 12 }) {
+        Column({ space: 3 }) {
+          Text(str('power_keep_alive'))
+            .fontSize(16).fontColor(COLOR_TEXT_PRIMARY);
+          Text(this.keepAliveStatusText())
+            .fontSize(13).fontColor(COLOR_TEXT_SECONDARY);
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1);
+        if (this.keepAliveBusy) {
+          LoadingProgress().width(24).height(24).color(COLOR_PRIMARY);
+        } else {
+          Toggle({ type: ToggleType.Switch, isOn: this.keepAliveOn })
+            .selectedColor(COLOR_PRIMARY)
+            .accessibilityText(str('power_keep_alive_switch'))
+            .onChange((value: boolean): void => {
+              this.toggleKeepAlive(value);
+            });
+        }
+      }
+      .width('100%').height(66).padding({ left: 18, right: 13 });
+      Divider().strokeWidth(0.7).color($r('app.color.divider')).margin({ left: 18, right: 18 });
+      Text(str('power_keep_alive_note'))
+        .fontSize(13).fontColor(COLOR_TEXT_SECONDARY)
+        .width('100%').padding({ left: 18, right: 18, top: 10, bottom: 13 });
+    }
+    .width('100%').backgroundColor(CARD_BG).borderRadius(CARD_RADIUS);
+  }
+
   build() {
     Column() {
       HdsSubDestination({ title: $r('app.string.settings_power'), scroller: this.hdsScroller }) {
@@ -463,6 +553,7 @@ export struct PowerUsagePage {
           Text($r('app.string.power_smooth_note'))
             .fontSize(13).fontColor(COLOR_TEXT_SECONDARY).width('100%')
             .padding({ left: 15, right: 15 });
+          this.keepAliveCard();
         }
         .width('100%')
         .padding({ left: 12, right: 12, top: EDGE_OVERLAY_VP, bottom: this.bottomSafe + 24 });

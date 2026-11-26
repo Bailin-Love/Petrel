@@ -3681,6 +3681,38 @@
       "value": "平滑过渡开关"
     },
     {
+      "name": "power_keep_alive",
+      "value": "后台持续运行"
+    },
+    {
+      "name": "power_keep_alive_note",
+      "value": "开启后切到后台仍保持消息同步与代理连接。部分手机不支持该能力，开启失败会自动关闭。"
+    },
+    {
+      "name": "power_keep_alive_on",
+      "value": "已开启"
+    },
+    {
+      "name": "power_keep_alive_off",
+      "value": "已关闭"
+    },
+    {
+      "name": "power_keep_alive_starting",
+      "value": "正在开启…"
+    },
+    {
+      "name": "power_keep_alive_unsupported",
+      "value": "当前设备不支持，已保持关闭"
+    },
+    {
+      "name": "power_keep_alive_failed",
+      "value": "开启失败（错误码 %1$d）"
+    },
+    {
+      "name": "power_keep_alive_switch",
+      "value": "后台持续运行开关"
+    },
+    {
       "name": "wp_registered_with_id",
       "value": "已注册 · receiver id %1$s"
     },
