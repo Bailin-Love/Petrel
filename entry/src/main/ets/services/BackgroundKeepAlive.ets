@@ -43,6 +43,9 @@ class BackgroundKeepAlive {
   private taskId: number = -1;
   private locationCallback: ((location: geoLocationManager.Location) => void) | null = null;
   private cancelHandler: ((info: backgroundTaskManager.ContinuousTaskCancelInfo) => void) | null = null;
+  // 进程正常退出时只是撤掉长时任务，不能把用户选过的模式写回 off——否则下次
+  // 打开应用（initSettings 读持久化）看到的就是关闭。
+  private shuttingDown: boolean = false;
 
   // 在 EntryAbility.onCreate 里尽早注入上下文。重复调用是幂等的。
   init(context: common.UIAbilityContext): void {
@@ -61,7 +64,9 @@ class BackgroundKeepAlive {
       this.running = false;
       this.mode = KEEP_ALIVE_OFF;
       logI(`[BackgroundKeepAlive] cancelled reason=${info.reason} id=${info.id}`);
-      this.persist(KEEP_ALIVE_OFF);
+      if (!this.shuttingDown) {
+        this.persist(KEEP_ALIVE_OFF);
+      }
     };
     try {
       backgroundTaskManager.on('continuousTaskCancel', this.cancelHandler);
@@ -207,6 +212,12 @@ class BackgroundKeepAlive {
     geoLocationManager.on('locationChange', request, callback);
   }
 
+  // 退出应用专用：撤任务但不改持久化，保留用户选择供下次启动恢复。
+  async stopForShutdown(): Promise<void> {
+    this.shuttingDown = true;
+    await this.stopInternal(false);
+  }
+
   private unsubscribeLocation(): void {
     const callback = this.locationCallback;
     this.locationCallback = null;
@@ -221,6 +232,9 @@ class BackgroundKeepAlive {
   }
 
   private persist(mode: string): void {
+    if (this.shuttingDown) {
+      return;
+    }
     // 模式是唯一真相源；旧布尔键只作迁移与兼容，避免两个开关各说各话。
     setString(KEY_BACKGROUND_KEEP_ALIVE_MODE, mode);
     setBoolean(KEY_BACKGROUND_KEEP_ALIVE, mode !== KEEP_ALIVE_OFF);

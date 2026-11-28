@@ -384,7 +384,7 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     // 进程都要没了，常驻任务没有意义；撤掉通知栏里那条「正在运行」。
-    backgroundKeepAlive.stop().then((): void => {}).catch((): void => {});
+    backgroundKeepAlive.stopForShutdown().then((): void => {}).catch((): void => {});
     // 保存任务全吊在这个 ability 的 context 上，ability 一没它们就都是死的，
     // 通知栏里那条进度不撤就永远停在原地（用户转述："总是停留在通知栏"）。
     cancelLiveDownloadNotifications();
